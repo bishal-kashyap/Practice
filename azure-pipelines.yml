@@ -1,19 +1,72 @@
-# Starter pipeline
-# Start with a minimal pipeline that you can customize to build and deploy your code.
-# Add steps that build, run tests, deploy, and more:
-# https://aka.ms/yaml
-
 trigger:
 - main
 
-pool:
-  vmImage: ubuntu-latest
+stages:
+- stage: Build
+  jobs:
+  - job: BuildJob
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - script: npm install
+      displayName: 'Install Node.js dependencies'
+      
+    - script: npm run build
+      displayName: 'Build application'
+    
+    - task: ArchiveFiles@2
+      inputs:
+        rootFolderOrFile: '$(System.DefaultWorkingDirectory)/dist'
+        includeRootFolder: false
+        archiveType: 'zip'
+        archiveFile: '$(Build.ArtifactStagingDirectory)/app.zip'
+        replaceExistingArchive: true
 
-steps:
-- script: echo Hello, world!
-  displayName: 'Run a one-line script'
+    - publish: $(Build.ArtifactStagingDirectory)/app.zip
+      artifact: drop
+      displayName: 'Publish artifact'
 
-- script: |
-    echo Add other tasks to build, test, and deploy your project.
-    echo See https://aka.ms/yaml
-  displayName: 'Run a multi-line script'
+- stage: Test
+  jobs:
+  - job: TestJob
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - download: current
+      artifact: drop
+      displayName: 'Download artifact'
+      
+    - task: ExtractFiles@1
+      inputs:
+        archiveFilePatterns: '$(Pipeline.Workspace)/drop/app.zip'
+        destinationFolder: '$(Pipeline.Workspace)/app'
+      
+    - script: npm install --prefix $(Pipeline.Workspace)/app
+      displayName: 'Install Node.js dependencies'
+      
+    - script: npm test --prefix $(Pipeline.Workspace)/app
+      displayName: 'Run tests'
+
+- stage: Deploy
+  jobs:
+  - job: DeployJob
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - download: current
+      artifact: drop
+      displayName: 'Download artifact'
+      
+    - task: ExtractFiles@1
+      inputs:
+        archiveFilePatterns: '$(Pipeline.Workspace)/drop/app.zip'
+        destinationFolder: '$(Pipeline.Workspace)/app'
+      
+    - task: AzureRmWebAppDeployment@4
+      inputs:
+        ConnectionType: 'AzureRM'
+        azureSubscription: 'AzureServiceConnection'  # Replace with your connection name
+        appType: 'webAppLinux'
+        WebAppName: 'your-web-app-name'
+        packageForLinux: '$(Pipeline.Workspace)/app'
+        RuntimeStack: 'NODE|12-lts'
